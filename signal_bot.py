@@ -1,4 +1,4 @@
-# main.py - Empire Trading Signal Bot with AI Parsing, Database, and Simple Logging
+# main.py - Full Empire Trading Signal Bot with AI Parsing, Database, and Simple Logging
 # Cleaned and simplified version - English logs, no Hindi, bulletproof error handling
 # Date: November 12, 2025
 # Features:
@@ -7,7 +7,7 @@
 # - Telegram client with Telethon
 # - AI parser with Ollama + Llama3 fallback to regex
 # - Simple English logging
-# - Chad format message with TP plan
+# - Simple format message with takeprofit and channel link
 # - 24/7 ready for Replit/PythonAnywhere/Render
 
 # Imports
@@ -103,9 +103,10 @@ async def login():
 # AI Parser with Fallback Regex
 def ai_parse_signal(text):
     prompt = f'''
-    Parse this text to JSON only. No extra words:
+    Parse this text to JSON only. No extra words or text:
     {{
       "direction": "BUY" or "SELL",
+      "pair": "XAUUSD" or "BTC" or other,
       "entry": number (average if zone),
       "sl": number,
       "tp1": number or null,
@@ -133,31 +134,42 @@ def ai_parse_signal(text):
     # Fallback Regex Parser
     logging.info("[AI FAILED] Using Regex Fallback")
     text_up = text.upper()
-    direction = "BUY" if any(word in text_up for word in ["BUY", "LONG", "CALL"]) else "SELL" if any(word in text_up for word in ["SELL", "SHORT", "PUT"]) else None
+    direction = "BUY" if "BUY" in text_up or "LONG" in text_up else "SELL" if "SELL" in text_up or "SHORT" in text_up else None
     if not direction:
         logging.error("No direction found — Skip")
         return None
 
+    # Pair
+    pair_match = re.search(r'(XAUUSD|GOLD|BTC|EURUSD|GBPUSD|USDJPY)', text_up)
+    pair = pair_match.group(1) if pair_match else "XAUUSD"
+
+    # Numbers extract
     numbers = [float(x) for x in re.findall(r'\d+\.?\d*', text)]
     if len(numbers) < 2:
         logging.error("Not enough numbers — Skip")
         return None
 
+    # Entry (zone handling)
     entry = numbers[0]
     zone_match = re.search(r'(\d+\.?\d*)\s*[-]?\s*(\d+\.?\d*)', text)
     if zone_match and zone_match.group(2):
         a, b = float(zone_match.group(1)), float(zone_match.group(2))
         entry = (a + b) / 2
 
-    sl = numbers[1]
+    # SL (near "SL" or "STOP")
+    sl_index = next((i for i, w in enumerate(re.split(r'\s+', text_up)) if w in ['SL', 'STOP', 'STOPLOSS']), None)
+    sl = numbers[sl_index + 1] if sl_index is not None and sl_index + 1 < len(numbers) else numbers[1]
 
-    tp1 = numbers[2] if len(numbers) > 2 else None
-    tp2 = numbers[3] if len(numbers) > 3 else None
-    tp3 = numbers[4] if len(numbers) > 4 else None
-    tp4 = numbers[5] if len(numbers) > 5 else None
+    # TP1, TP2, TP3, TP4 (next numbers)
+    tp_start = 2
+    tp1 = numbers[tp_start] if len(numbers) > tp_start else None
+    tp2 = numbers[tp_start + 1] if len(numbers) > tp_start + 1 else None
+    tp3 = numbers[tp_start + 2] if len(numbers) > tp_start + 2 else None
+    tp4 = numbers[tp_start + 3] if len(numbers) > 3 + tp_start else None
 
     result = {
         "direction": direction,
+        "pair": pair,
         "entry": round(entry, 1),
         "sl": round(sl, 1),
         "tp1": round(tp1, 1) if tp1 else None,
@@ -187,23 +199,27 @@ async def handler(event):
                   datetime.now().strftime("%Y-%m-%d %H:%M")))
             conn.commit()
 
-            # Chad Format
+            # Simple Format
             tp_lines = ""
-            if signal.get('tp1'): tp_lines += f"TP1: `{signal['tp1']}` → **+${abs(signal['tp1'] - signal['entry']) * lot_size:.1f}**\n"
-            if signal.get('tp2'): tp_lines += f"TP2: `{signal['tp2']}` → **+${abs(signal['tp2'] - signal['entry']) * lot_size:.1f}**\n"
-            if signal.get('tp3'): tp_lines += f"TP3: `{signal['tp3']}` → **+${abs(signal['tp3'] - signal['entry']) * lot_size:.1f}**\n"
-            if signal.get('tp4'): tp_lines += f"TP4: `{signal['tp4']}` → **HOLD**\n"
+            if signal.get('tp1'): tp_lines += f"Take Profit 1: `{signal['tp1']}`\n"
+            if signal.get('tp2'): tp_lines += f"Take Profit 2: `{signal['tp2']}`\n"
+            if signal.get('tp3'): tp_lines += f"Take Profit 3: `{signal['tp3']}`\n"
+            if signal.get('tp4'): tp_lines += f"Take Profit 4: `{signal['tp4']}`\n"
+
+            # Channel Link
+            channel_username = chat.username if chat.username else f"c/{abs(chat.id)}"
+            message_id = event.message.id
+            link = f"https://t.me/{channel_username}/{message_id}"
 
             msg = f"""
-**{channel_name} | LIVE SIGNAL**
-**XAUUSD {signal['direction'].upper()} NOW**
-**Entry:** `{signal['entry']}`
-**SL:** `{signal['sl']}`
-**MULTI-TP PLAN ({lot_size} lot):**
+**{channel_name} SIGNAL**
+
+**{signal['direction'].upper()} {signal['pair']}**
+Entry: `{signal['entry']}`
+SL: `{signal['sl']}`
+
 {tp_lines}
-**TRAIL:**
-TP1 hit → SL to Entry
-TP2 hit → SL to TP1
+Check Original: [Click Here]({link})
             """
             await client.send_message(main_group, msg, parse_mode='md')
             logging.info("Signal sent")
@@ -220,3 +236,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
