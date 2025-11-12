@@ -252,4 +252,27 @@ async def main():
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
+
     asyncio.run(main())
+    import os
+from telethon.errors import SessionPasswordNeededError
+
+async def auto_login():
+    await client.start(phone=phone)
+    if not await client.is_user_authorized():
+        code = os.getenv('TELEGRAM_CODE')
+        if not code:
+            print("BHAI, TELEGRAM_CODE ENV BANA LE!")
+            exit()
+        try:
+            await client.sign_in(phone, code)
+            print("CODE SE LOGIN KIYA!")
+        except SessionPasswordNeededError:
+            password = os.getenv('TELEGRAM_PASSWORD')
+            if password:
+                await client.sign_in(password=password)
+                print("2FA PASSWORD SE LOGIN KIYA!")
+            else:
+                print("2FA HAI LEKIN PASSWORD NAI MILA!")
+                exit()
+    print("BHAI, LOGIN SUCCESS — BOT LIVE HAI!")
